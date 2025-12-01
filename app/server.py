@@ -6,7 +6,6 @@ from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from app.router import device, actuator, sensor, template
 from app.util.database import init_db
-import paho.mqtt.client as mqtt
 from app.util.logging import logging
 from app.util.broker import mqttClient
 from app.crud.event.listener import on_register, on_update

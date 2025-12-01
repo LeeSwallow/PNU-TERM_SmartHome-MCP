@@ -43,6 +43,7 @@ class SmartHomeClient {
 public:
     using ActuatorCallback = void(*)(const String& name, int state);
     using LogCallback = void(*) (const LogType& log);
+    using RegisterCallback = void(*) (const String& name);
     // constructor
     static SmartHomeClient* getInstance(WiFiClient& wifiClient, const String& deviceId);
     SmartHomeClient(WiFiClient& wifiClient, const String& deviceId);
@@ -54,15 +55,17 @@ public:
     void setupMQTT(const char* server, uint16_t port, const char* username, const char* password);
     void addActuator(String name, int level);
     void addSensor(String name, String type);
-    void setActuatorCallback(ActuatorCallback callback);
     void setLogCallback(LogCallback callback);
+    void setRegisterCallback(RegisterCallback callback);
+    void setActuatorCallback(ActuatorCallback callback);
     void publishSensorState(String name, String state);
     void publishActuatorState(String name, int state);
     void loop();
 private:
     static SmartHomeClient* instance;
-    static ActuatorCallback actuatorCallback;
     static LogCallback logCallback;
+    static RegisterCallback registerCallback;
+    static ActuatorCallback actuatorCallback;
 
     String deviceId;
     PubSubClient mqttClient;

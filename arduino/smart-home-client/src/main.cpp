@@ -25,6 +25,7 @@ String mqttPassword;
 void setup_WiFi();
 void read_json_from_executor();
 void log_callback(const LogType& log);
+void register_callback(const String& name);
 void actuator_callback(const String& actuator_name, int value);
 void setup_smart_home();
 void processSerialCommands();
@@ -41,7 +42,9 @@ void setup() {
 
 void loop() {
   processSerialCommands();
-  smartHomeClient->loop();
+  if (smartHomeClient != nullptr) {
+    smartHomeClient->loop();
+  }
 }
 
 void setup_WiFi() {
@@ -97,6 +100,21 @@ void setup_WiFi() {
   Serial2.println();
 }
 
+void log_callback(const LogType& log) {
+  JsonDocument doc;
+  Serial.println("Log( " + log.type + " ): " + log.message);
+  Serial2.println(log.getLogMessage());
+}
+
+void register_callback(const String& name) {
+  JsonDocument doc;
+  doc["type"] = "register";
+  doc["name"] = name;
+  Serial.println("Register Callback: " + name);
+  serializeJsonPretty(doc, Serial2);
+  Serial2.println();
+}
+
 void actuator_callback(const String& actuator_name, int value) {
   JsonDocument doc;
   doc["type"] = "actuator";
@@ -107,15 +125,15 @@ void actuator_callback(const String& actuator_name, int value) {
   Serial2.println();
 }
 
-void log_callback(const LogType& log) {
-  JsonDocument doc;
-  Serial.println("Log( " + log.type + " ): " + log.message);
-  Serial2.println(log.getLogMessage());
-}
-
 void setup_smart_home() {
   smartHomeClient = new SmartHomeClient(espClient, DEVICE_ID.c_str());
+  if (smartHomeClient == nullptr) {
+      Serial.println("ERROR: Failed to create SmartHomeClient");
+      ESP.restart();
+      return;
+  }
   smartHomeClient->setLogCallback(log_callback);
+  smartHomeClient->setRegisterCallback(register_callback);
   smartHomeClient->setActuatorCallback(actuator_callback);
   smartHomeClient->setupMQTT(mqttServer.c_str(), mqttPort, mqttUsername.c_str(), mqttPassword.c_str());
 }
@@ -141,6 +159,11 @@ void processSerialCommands() {
 }
 
 void processOnRegister(const JsonDocument& doc) {
+  if (smartHomeClient == nullptr) {
+      log_callback(LogType("error", "SmartHomeClient not initialized"));
+      return;
+  }
+  
   String entityType = doc["type"].as<String>();
   String name = doc["name"].as<String>();
   
@@ -167,6 +190,11 @@ void processOnRegister(const JsonDocument& doc) {
 }
 
 void processOnUpdate(const JsonDocument& doc) {
+  if (smartHomeClient == nullptr) {
+      log_callback(LogType("error", "SmartHomeClient not initialized"));
+      return;
+  }
+  
   String type = doc["type"].as<String>();
   String name = doc["name"].as<String>();
   if (type == "sensor") {

@@ -57,6 +57,7 @@ String LogType::getLogMessage() const {
 }
 
 SmartHomeClient* SmartHomeClient::instance = nullptr;
+SmartHomeClient::RegisterCallback SmartHomeClient::registerCallback = nullptr;
 SmartHomeClient::ActuatorCallback SmartHomeClient::actuatorCallback = nullptr;
 SmartHomeClient::LogCallback SmartHomeClient::logCallback = nullptr;
 
@@ -70,7 +71,11 @@ SmartHomeClient* SmartHomeClient::getInstance(WiFiClient& wifiClient, const Stri
 SmartHomeClient::SmartHomeClient(WiFiClient& wifiClient, const String& deviceId)
     : mqttClient(wifiClient) {
     if (instance != nullptr) {
-        throw std::runtime_error("SmartHomeClient instance already exists!");
+        // 예외 대신 로그 출력 및 기존 인스턴스 반환
+        if (logCallback != nullptr) {
+            logCallback(LogType("error", "SmartHomeClient instance already exists!"));
+        }
+        return;
     }
     SmartHomeClient::instance = this;
     this->deviceId = deviceId;
@@ -130,6 +135,10 @@ void SmartHomeClient::addSensor(String name, String type) {
 
 void SmartHomeClient::setActuatorCallback(ActuatorCallback callback) {
     actuatorCallback = callback;
+}
+
+void SmartHomeClient::setRegisterCallback(RegisterCallback callback) {
+    registerCallback = callback;
 }
 
 void SmartHomeClient::setLogCallback(LogCallback callback) {
@@ -214,14 +223,14 @@ void SmartHomeClient::_onRegister(String payload) {
     auto ait = client->actuators.find(key);
     if (ait != client->actuators.end()) {
         ait->second.isRegistered = true;
-        if (logCallback != nullptr) logCallback(LogType("info", "Actuator registered: " + name));
+        if (registerCallback != nullptr) registerCallback(name);
         return;
     }
 
     auto sit = client->sensors.find(key);
     if (sit != client->sensors.end()) {
         sit->second.isRegistered = true;
-        if (logCallback != nullptr) logCallback(LogType("info", "Sensor registered: " + name));
+        if (registerCallback != nullptr) registerCallback(name);
         return;
     }
 }
