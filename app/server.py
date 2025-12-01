@@ -11,7 +11,7 @@ from app.util.logging import logging
 from app.util.broker import mqttClient
 from app.crud.event.listener import on_register, on_update
 from fastapi.templating import Jinja2Templates
-
+from prometheus_fastapi_instrumentator import Instrumentator
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# Prometheus Metric 등록
+Instrumentator().instrument(app).expose(app)
 
 # Jinja2 템플릿 설정
 templates = Jinja2Templates(directory="app/templates")
