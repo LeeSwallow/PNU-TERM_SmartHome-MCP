@@ -1,7 +1,8 @@
-from typing import List, Annotated
+from typing import Annotated
 from pydantic import Field
 from shmcp.server import mcpServer
-from shmcp.schema import DeviceResponse, ActuatorResponse, SensorResponse
+from shmcp.schema import ActuatorResponse, SensorResponse
+
 from shmcp.util.client import (
     get_device_info as api_get_device_info,
     api_get_actuators,
@@ -9,6 +10,9 @@ from shmcp.util.client import (
     api_get_sensors,
     api_get_sensor,
     api_update_actuator_state,
+    api_update_device_info,
+    api_update_actuator_info,
+    api_update_sensor_info,
 )
 
 @mcpServer.tool(
@@ -60,4 +64,39 @@ async def set_actuator_state(
     state: Annotated[int, Field(description="0~level 사이의 값")],
 ) -> dict:
     await api_update_actuator_state(actuator_id=actuator_id, state=state)
+    return {"ok": True}
+
+@mcpServer.tool(
+    name="update_device_info",
+    description="IoT 기기의 이름(사용자에게 표시되는 이름)과 설명을 업데이트합니다.",
+) 
+async def update_device_info(
+    name: Annotated[str | None, Field(description="기기 이름")] = None,
+    description: Annotated[str | None, Field(description="기기 설명")] = None,
+) -> dict:
+    await api_update_device_info(name=name, description=description)
+    return {"ok": True}
+
+@mcpServer.tool(
+    name="update_sensor_info",
+    description="센서의 이름과 설명을 업데이트합니다.",
+)
+async def update_sensor_info(
+    sensor_id: Annotated[int, Field(description="센서 ID")],
+    name: Annotated[str | None, Field(description="센서 이름")] = None,
+    description: Annotated[str | None, Field(description="센서 설명")] = None,
+) -> dict:
+    await api_update_sensor_info(sensor_id=sensor_id, name=name, description=description)
+    return {"ok": True}
+
+@mcpServer.tool(
+    name="update_actuator_info",
+    description="액추에이터의 이름과 설명을 업데이트합니다.",
+)
+async def update_actuator_info(
+    actuator_id: Annotated[int, Field(description="액추에이터 ID")],
+    name: Annotated[str | None, Field(description="액추에이터 이름")] = None,
+    description: Annotated[str | None, Field(description="액추에이터 설명")] = None,
+) -> dict:
+    await api_update_actuator_info(actuator_id=actuator_id, name=name, description=description)
     return {"ok": True}

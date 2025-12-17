@@ -51,3 +51,26 @@ async def api_update_actuator_state(actuator_id: int, state: int):
     payload = {"state": state}
     return await post_request(f"/api/v1/devices/{DEVICE_ID}/actuators/{actuator_id}/action", payload)
 
+async def api_update_device_info(name: str | None = None, description: str | None = None):
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    return await put_request(f"/api/v1/devices/{DEVICE_ID}", payload)
+
+async def api_update_sensor_info(sensor_id: int, name: str | None = None, description: str | None = None):
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    return await put_request(f"/api/v1/devices/{DEVICE_ID}/sensors/{sensor_id}", payload)
+
+async def api_update_actuator_info(actuator_id: int, name: str | None = None, description: str | None = None):
+    payload = {}
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    return await put_request(f"/api/v1/devices/{DEVICE_ID}/actuators/{actuator_id}", payload)
