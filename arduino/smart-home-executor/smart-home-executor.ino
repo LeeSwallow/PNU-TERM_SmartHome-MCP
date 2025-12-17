@@ -2,6 +2,8 @@
 #include <DHT.h>
 #include <Servo.h>
 #include <Adafruit_NeoPixel.h>
+
+#define DEBUG_BUADRATE 115200
 #define MQTT_BAUDRATE 9600
 
 // actuator settings
@@ -9,10 +11,8 @@
 #define LIGHT_ACTUATOR_IDX 0
 #define DOOR_ACTUATOR_IDX 1
 #define AUTO_LIGHT_ACTUATOR_IDX 2
-
 #define LIGHT_ACTUATOR_PIN 5
 #define DOOR_ACTUATOR_PIN 6
-
 #define NUMPIXELS 12
 
 // sensor settings
@@ -21,7 +21,6 @@
 #define TEMPERATURE_SENSOR_IDX 1
 #define HUMIDITY_SENSOR_IDX 2
 #define HUMAN_DETECT_SENSOR_IDX 3
-
 #define LIGHT_SENSOR_PIN A0
 #define DHT11_PIN 7
 #define HUMAN_DETECT_SENSOR_PIN 8
@@ -52,6 +51,7 @@ void registerActuators();
 void onRecievedAction(JsonDocument& doc);
 void updateActuatorState(int index, int value);
 void sendActuatorState(int index);
+void autoControlLight();
 
 // NeoPixel object for light actuator
 Adafruit_NeoPixel pixels(NUMPIXELS, LIGHT_ACTUATOR_PIN, NEO_GRB + NEO_KHZ800);
@@ -89,12 +89,16 @@ DHT dht(DHT11_PIN, DHT11);
 */
 
 boolean mqttConnected = false;
-
 unsigned long globalRegisterLastMillis = 0;
-String proccessingCommandBuffer = "";
-boolean isProccessing;
-
 void proccessCommand(JsonDocument& doc);
+
+void onRecivedInfo(JsonDocument& doc);
+void onRecivedError(JsonDocument& doc);
+void onRecievedConnection(JsonDocument& doc);
+void onRecivedRegister(JsonDocument& doc);
+
+void sendConnectionRequest();
+void sendSerialJson(JsonDocument& doc);
 
 /*==================================================================
     셋업 함수
@@ -102,9 +106,8 @@ void proccessCommand(JsonDocument& doc);
 */
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(DEBUG_BUADRATE);
     Serial1.begin(MQTT_BAUDRATE, SERIAL_8N1);
-    
     
     actuators[LIGHT_ACTUATOR_IDX].name = "light";
     actuators[LIGHT_ACTUATOR_IDX].level = 256; // 0-255
@@ -134,6 +137,7 @@ void setup() {
     actuators[AUTO_LIGHT_ACTUATOR_IDX].lastRegisterSentMillis = 0;
     actuators[AUTO_LIGHT_ACTUATOR_IDX].lastStateSentMillis = 0;
 
+    pinMode(LIGHT_SENSOR_PIN, INPUT);
     sensors[LIGHT_SENSOR_IDX].name = "light_sensor";
     sensors[LIGHT_SENSOR_IDX].data_type = "integer";
     sensors[LIGHT_SENSOR_IDX].state = "0";
@@ -156,6 +160,7 @@ void setup() {
     sensors[HUMIDITY_SENSOR_IDX].lastRegisterSentMillis = 0;
     sensors[HUMIDITY_SENSOR_IDX].lastStateSentMillis = 0;
 
+    pinMode(HUMAN_DETECT_SENSOR_PIN, INPUT);    
     sensors[HUMAN_DETECT_SENSOR_IDX].name = "human_detect_sensor";
     sensors[HUMAN_DETECT_SENSOR_IDX].data_type = "boolean";
     sensors[HUMAN_DETECT_SENSOR_IDX].state = "false";
@@ -172,63 +177,24 @@ void setup() {
 */
 
 void loop() {
+    
+    // 명령 처리
     JsonDocument doc;
     proccessCommand(doc);
+
     if (mqttConnected) {
         // 등록되지 않은 액추에이터 및 센서 등록 시도
         registerActuators();
         registerSensors();
 
+        // 센서 상태 업데이트
         for (int i = 0; i < SENSOR_COUNT; i++) {
-            unsigned long currentMillis = millis();
-            if (currentMillis - sensors[i].lastStateSentMillis >= SENSOR_UPDATE_INTERVAL) {
-                switch(i) {
-                    case LIGHT_SENSOR_IDX: {
-                        int lightValue = analogRead(LIGHT_SENSOR_PIN);
-                        sensors[i].state = String(lightValue);
-                        break;
-                    }
-                    case TEMPERATURE_SENSOR_IDX: {
-                        float temperature = dht.readTemperature();
-                        sensors[i].state = String(temperature);
-                        break;
-                    }
-                    case HUMIDITY_SENSOR_IDX: {
-                        float humidity = dht.readHumidity();
-                        sensors[i].state = String(humidity);
-                        break;
-                    }
-                    case HUMAN_DETECT_SENSOR_IDX: {
-                        int humanDetectValue = digitalRead(HUMAN_DETECT_SENSOR_PIN);
-                        sensors[i].state = humanDetectValue == HIGH ? "true" : "false";
-                        break;
-                    }
-                }
-                sendSensorState(i);
-            }
+            updateSensorState(i);
         }
-        unsigned long currentMillis = millis();
-        // 인체 감지 시 자동 조명 제어
-        if (actuators[LIGHT_ACTUATOR_IDX].isRegistered && 
-            actuators[AUTO_LIGHT_ACTUATOR_IDX].isRegistered && 
-            sensors[HUMAN_DETECT_SENSOR_IDX].isRegistered &&
-            actuators[AUTO_LIGHT_ACTUATOR_IDX].state > 0 &&
-            currentMillis - actuators[LIGHT_ACTUATOR_IDX].lastStateSentMillis  >= SENSOR_UPDATE_INTERVAL
-        ) {
-            if (sensors[HUMAN_DETECT_SENSOR_IDX].state == "true") {
-                updateActuatorState(LIGHT_ACTUATOR_IDX, 255);
-            } else {
-                updateActuatorState(LIGHT_ACTUATOR_IDX, 0);
-            }
-        }
+        // 자동 조명 제어
+        autoControlLight();
     } else {
-        unsigned long currentMillis = millis();
-        if (currentMillis - globalRegisterLastMillis >= REGISTER_INTERVAL) {
-            doc["command"] = "connection";
-            serializeJsonPretty(doc, Serial1);
-            Serial1.println();
-            globalRegisterLastMillis = currentMillis;
-        }
+        sendConnectionRequest();
     }
 }
 
@@ -237,10 +203,20 @@ void loop() {
 ====================================================================
 */
 
+void sendConnectionRequest() {
+    unsigned long currentMillis = millis();
+    if (currentMillis - globalRegisterLastMillis < REGISTER_INTERVAL) {
+        return; // 등록 간격이 지나지 않음
+    }
+
+    globalRegisterLastMillis = currentMillis;
+    JsonDocument doc;
+    doc["command"] = "connection";
+    sendSerialJson(doc);
+}
 
 void registerActuators() {
     unsigned long currentMillis = millis();
-
     if (currentMillis - globalRegisterLastMillis < REGISTER_INTERVAL) {
         return; // 등록 간격이 지나지 않음
     }
@@ -253,8 +229,7 @@ void registerActuators() {
             doc["type"] = "actuator";
             doc["name"] = actuators[i].name;
             doc["level"] = actuators[i].level;
-            serializeJsonPretty(doc, Serial1);
-            Serial1.println();
+            sendSerialJson(doc);
             Serial.println("Register Sent(actuator): " +  actuators[i].name);
             actuators[i].lastRegisterSentMillis = currentMillis;
             return; // 한 번에 하나씩만 등록 시도
@@ -267,7 +242,6 @@ void registerSensors() {
     if (currentMillis - globalRegisterLastMillis < REGISTER_INTERVAL) {
         return; // 등록 간격이 지나지 않음
     }
-
     globalRegisterLastMillis = currentMillis;
     
     for (int i = 0; i < SENSOR_COUNT; i++) {
@@ -277,8 +251,7 @@ void registerSensors() {
             doc["type"] = "sensor";
             doc["name"] = sensors[i].name;
             doc["data_type"] = sensors[i].data_type;
-            serializeJsonPretty(doc, Serial1);
-            Serial1.println();
+            sendSerialJson(doc);
             Serial.println("Register Sent(sensor): " +  sensors[i].name);
             sensors[i].lastRegisterSentMillis = currentMillis;
             return; // 한 번에 하나씩만 등록 시도
@@ -286,11 +259,58 @@ void registerSensors() {
     }
 }
 
+void onRecievedInfo(JsonDocument& doc) {
+    Serial.println("Info(mqtt client): " + doc["message"].as<String>());
+}
+
+void onRecivedError(JsonDocument& doc) {
+    Serial.println("Error(mqtt client): " + doc["message"].as<String>());
+}
+
+void onRecievedConnection(JsonDocument& doc) {
+    bool status = doc["status"].as<bool>();
+    if (status) {
+        mqttConnected = true;
+        Serial.println("MQTT connected");
+    } else {
+        mqttConnected = false;
+        Serial.println("MQTT failed to connect.. retrying");
+    }
+}
+
+void onRecivedRegister(JsonDocument& doc) {
+    String name = doc["name"].as<String>();
+    String entity = doc["entity"].as<String>();
+    // Actuator 등록 처리
+    if (entity == "actuator") {
+        for (int i = 0; i < ACTUATOR_COUNT; i++) {
+            if (actuators[i].name == name) {
+                actuators[i].isRegistered = true; // 등록 상태 갱신
+                sendActuatorState(i);
+                Serial.println(name + "(actuator) Registered!");
+                break;
+            }
+        }
+    // Sensor 등록 처리
+    } else if (entity == "sensor") {
+        for (int i = 0; i < SENSOR_COUNT; i++) {
+            if (sensors[i].name == name) {
+                sensors[i].isRegistered = true;
+                Serial.println(name + "(sensor) Registered!");
+                sendSensorState(i);
+                break;
+            }
+        }
+    // 잘못된 entity 타입 처리
+    } else {
+        Serial.println("invalid entity type! :" + entity);
+    }
+}
+
 void onRecievedAction(JsonDocument& doc) {
     String name = doc["name"].as<String>();
     int value = doc["value"].as<int>();
     Serial.println("Action received for " + name + ": " + String(value));
-
     int recievedIndex = -1;
     for (int i = 0; i < ACTUATOR_COUNT; i++) {
         if (actuators[i].name == name) {
@@ -307,110 +327,94 @@ void onRecievedAction(JsonDocument& doc) {
 
 void proccessCommand(JsonDocument& doc) {
     if (Serial1.available()) {
-        char ch = Serial1.read();
-        Serial.print(ch);
-        if (ch == '\n' || ch == '\r') {
-            return; // 줄바꿈 문자 무시
-        }
-        proccessingCommandBuffer += ch;
-        if (ch == '{') {
-            isProccessing = true;
-        }
-        if (ch == '}') {
-            isProccessing = false;
-            Serial.println();
-        }
-        if (isProccessing) {
-            return;
-        }
-
-        JsonDocument recieved_doc;
-        String command = proccessingCommandBuffer;
-        proccessingCommandBuffer = "";
-        DeserializationError error = deserializeJson(recieved_doc, command);
+        String command = Serial1.readStringUntil('\n');
+        command.trim();
+        if (command.length() == 0) return;
+        
+        doc.clear();
+        DeserializationError error = deserializeJson(doc, command);
         if (error) {
             Serial.println("Failed to parse JSON: " + String(error.c_str()));
             return;
         }
         Serial.println("command Recieved : " + command);
-        String type = recieved_doc["type"].as<String>();
+        String type = doc["type"].as<String>();
+
+        // MQTT Client의 연결 상태 처리
         if (type == "connection") {
-            bool status = recieved_doc["status"].as<bool>();
-            if (status) {
-                mqttConnected = true;
-                Serial.println("MQTT connected");
-            } else {
-                mqttConnected = false;
-                Serial.println("MQTT failed to connect.. retrying");
-            }
+            onRecievedConnection(doc);
         }
+        // MQTT Client 의 로그 메시지 처리
         else if (type == "info") {
-            Serial.println("Info(mqtt client): " + recieved_doc["message"].as<String>());
+            onRecievedInfo(doc);
         }
+        // MQTT Client 의 에러 메시지 처리
         else if (type == "error") {
-            Serial.println("Error(mqtt client): " + recieved_doc["message"].as<String>());
+            onRecivedError(doc);
         }
+        // MQTT Client 로부터의 등록 완료 알림 처리
         else if (type == "register") {
-            // 등록 완료 알림 처리
-            String name = recieved_doc["name"].as<String>();
-            String entity = recieved_doc["entity"].as<String>();
-            
-            // 로컬 배열에서 해당 모듈 찾아서 isRegistered 업데이트
-            if (entity == "actuator") {
-                for (int i = 0; i < ACTUATOR_COUNT; i++) {
-                    if (actuators[i].name == name) {
-                        actuators[i].isRegistered = true;
-                        sendActuatorState(i);
-                        Serial.println(name + "(actuator) Registered!");
-                        break;
-                    }
-                }
-            } else if (entity == "sensor") {
-                for (int i = 0; i < SENSOR_COUNT; i++) {
-                    if (sensors[i].name == name) {
-                        sensors[i].isRegistered = true;
-                        Serial.println(name + "(sensor) Registered!");
-                        sendSensorState(i);
-                        break;
-                    }
-                }
-            } else {
-                Serial.println("invalid entity type! :" + entity);
-            }
-            Serial.println("Registered: " + name);
+            onRecivedRegister(doc);
         }
+        // 액추에이터에 대한 동작 명령 처리
         else if (type == "actuator") {
-            onRecievedAction(recieved_doc);
+            onRecievedAction(doc);
+        } else {
+            Serial.println("Unknown command type: " + type);
         }
     }
 }
 
 void sendActuatorState(int index) {
-    if (!actuators[index].isRegistered) return;
-
     JsonDocument doc;
     doc["command"] = "update";
     doc["type"] = "actuator";
     doc["name"] = actuators[index].name;
     doc["state"] = actuators[index].state;
-    serializeJsonPretty(doc, Serial1);
-    Serial1.println();
+    sendSerialJson(doc);
     actuators[index].lastStateSentMillis = millis();
     Serial.println("Acutator: " + actuators[index].name + ", State: " + String(actuators[index].state));
 }
 
 void sendSensorState(int index) {
-    if (!actuators[index].isRegistered) return;
-    
     JsonDocument doc;
     doc["command"] = "update";
     doc["type"] = "sensor";
     doc["name"] = sensors[index].name;
     doc["state"] = sensors[index].state;
-    serializeJsonPretty(doc, Serial1);
-    Serial1.println();
+    sendSerialJson(doc);
     sensors[index].lastStateSentMillis = millis();
     Serial.println("Sensor: " + sensors[index].name + ", State: " + sensors[index].state);
+}
+
+void updateSensorState(int index) {
+    unsigned long currentMillis = millis();
+    if (!sensors[index].isRegistered || (currentMillis - sensors[index].lastStateSentMillis < SENSOR_UPDATE_INTERVAL)) {
+        return;
+    }
+    switch(index) {
+        case LIGHT_SENSOR_IDX: {
+            int lightValue = analogRead(LIGHT_SENSOR_PIN);
+            sensors[index].state = String(lightValue);
+            break;
+        }
+        case TEMPERATURE_SENSOR_IDX: {
+            float temperature = dht.readTemperature();
+            sensors[index].state = String(temperature);
+            break;
+        }
+        case HUMIDITY_SENSOR_IDX: {
+            float humidity = dht.readHumidity();
+            sensors[index].state = String(humidity);
+            break;
+        }
+        case HUMAN_DETECT_SENSOR_IDX: {
+            int humanDetectValue = digitalRead(HUMAN_DETECT_SENSOR_PIN);
+            sensors[index].state = humanDetectValue == HIGH ? "true" : "false";
+            break;
+        }
+    }
+    sendSensorState(index);
 }
 
 void updateActuatorState(int index, int value) {
@@ -418,19 +422,46 @@ void updateActuatorState(int index, int value) {
         Serial.println("Actuator not registered: " + actuators[index].name);
         return;
     }
-    if (index == LIGHT_ACTUATOR_IDX) {
-        actuators[index].state = value;
-        for (int i=0; i<NUMPIXELS; ++i) pixels.setPixelColor(i, pixels.Color(value, value, value));
-        pixels.show();
-        sendActuatorState(index);
-        actuators[AUTO_LIGHT_ACTUATOR_IDX].state = 0; // 자동 조명 끄기
-        sendActuatorState(AUTO_LIGHT_ACTUATOR_IDX);
-    } else if (index == DOOR_ACTUATOR_IDX) {
-        actuators[index].state = value;
-        doorServo.write(value);
-        sendActuatorState(index);
-    } else if (index == AUTO_LIGHT_ACTUATOR_IDX) {
-        actuators[index].state = value;
-        sendActuatorState(index);
+
+    switch (index) {
+        case LIGHT_ACTUATOR_IDX:
+            actuators[index].state = value;
+            for (int i=0; i<NUMPIXELS; ++i) pixels.setPixelColor(i, pixels.Color(value, value, value));
+            pixels.show();
+            sendActuatorState(index);
+
+            actuators[AUTO_LIGHT_ACTUATOR_IDX].state = 0; // 자동 조명 끄기
+            sendActuatorState(AUTO_LIGHT_ACTUATOR_IDX);
+            break;
+
+        case DOOR_ACTUATOR_IDX:
+            actuators[index].state = value;
+            doorServo.write(value);
+            sendActuatorState(index);
+            break;
+
+        case AUTO_LIGHT_ACTUATOR_IDX:
+            actuators[index].state = value;
+            sendActuatorState(index);
+            break;
     }
+}
+
+void autoControlLight() {
+    unsigned long currentMillis = millis();
+    if (actuators[AUTO_LIGHT_ACTUATOR_IDX].state == 0 ||
+        currentMillis - actuators[LIGHT_ACTUATOR_IDX].lastStateSentMillis < SENSOR_UPDATE_INTERVAL) {
+        return; 
+    }
+    if (sensors[HUMAN_DETECT_SENSOR_IDX].state == "true") {
+        updateActuatorState(LIGHT_ACTUATOR_IDX, 255);
+    } else {
+        updateActuatorState(LIGHT_ACTUATOR_IDX, 0);
+    }
+}
+
+void sendSerialJson(JsonDocument& doc) {
+    Serial.println();
+    serializeJson(doc, Serial1);
+    Serial1.println('\n');
 }

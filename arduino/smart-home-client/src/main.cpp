@@ -22,9 +22,6 @@ int mqttPort;
 String mqttUsername;
 String mqttPassword;
 
-String bufferString = "";
-int jsonStack = 0;
-
 void setup_WiFi();
 void read_json_from_executor();
 void log_callback(const LogType& log);
@@ -35,6 +32,8 @@ void processSerialCommands();
 void proccessOnConnectQuery();
 void processOnRegister(const JsonDocument& doc);
 void processOnUpdate(const JsonDocument& doc);
+void sendSerialString(const String& message);
+void sendSerialJson(const JsonDocument& doc);
 
 void setup() {
   Serial.begin(115200); // for debugging
@@ -54,8 +53,8 @@ void loop() {
 void setup_WiFi() {
   // 커스텀 파라미터 추가
   JsonDocument doc;
-  char mqttServerBuf[64] = "????";
-  char mqttPortBuf[6] = "????";
+  char mqttServerBuf[64] = "swallow104.gonetis.com";
+  char mqttPortBuf[6] = "11883";
   char mqttUserBuf[32] = "test_user";
   char mqttPassBuf[32] = "testpass1212";
 
@@ -86,7 +85,7 @@ void setup_WiFi() {
 void log_callback(const LogType& log) {
   JsonDocument doc;
   Serial.println("Log( " + log.type + " ): " + log.message);
-  Serial2.println(log.getLogMessage());
+  sendSerialString(log.getLogMessage());
 }
 
 void register_callback(const String& name, const String& entity) {
@@ -95,8 +94,7 @@ void register_callback(const String& name, const String& entity) {
   doc["entity"] = entity;
   doc["name"] = name;
   Serial.println("Register Callback: " + name + " (" + entity + ")");
-  serializeJsonPretty(doc, Serial2);
-  Serial2.println();
+  sendSerialJson(doc);
 }
 
 void actuator_callback(const String& actuator_name, int value) {
@@ -105,8 +103,7 @@ void actuator_callback(const String& actuator_name, int value) {
   doc["name"] = actuator_name;
   doc["value"] = value;
   Serial.println("Actuator Callback: " + actuator_name + " -> " + String(value));
-  serializeJsonPretty(doc, Serial2);
-  Serial2.println();
+  sendSerialJson(doc);
 }
 
 void setup_smart_home() {
@@ -124,16 +121,11 @@ void setup_smart_home() {
 
 void processSerialCommands() {
   if (Serial2.available()) {
-      char ch = Serial2.read();
-      // Serial.print(ch); // 디버깅용
-      if (ch == '\n' || ch == '\r') return;
-      if (ch == '{') { jsonStack++; bufferString = "{"; return; }
-      if (ch == '}') jsonStack--; 
-      bufferString += ch;
-      if (jsonStack > 0) return; // 아직 JSON이 완성되지 않음
-
-      String command = bufferString;
-      bufferString = "";
+      String command = Serial2.readStringUntil('\n');
+      command.trim();
+      if (command.length() == 0) {
+          return;
+      }
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, command);
       if (error) {
@@ -157,14 +149,14 @@ void processSerialCommands() {
 
 void proccessOnConnectQuery() {
   JsonDocument doc;
+  // if not connected to MQTT broker
   if (smartHomeClient == nullptr) {
       doc["type"] = "connection";
       doc["status"] = false;
-      serializeJsonPretty(doc, Serial2);
-      Serial2.println();
+      sendSerialJson(doc);
       return;
   }
-
+  // connected to MQTT broker
   doc["type"] = "connection";
   doc["status"] = true;
   doc["ip"] = WiFi.localIP().toString();
@@ -172,8 +164,7 @@ void proccessOnConnectQuery() {
   doc["mqtt_server"] = mqttServer;
   doc["mqtt_port"] = mqttPort;
   doc["mqtt_username"] = mqttUsername;
-  serializeJsonPretty(doc, Serial2);
-  Serial2.println();
+  sendSerialJson(doc);
 }
 
 void processOnRegister(const JsonDocument& doc) {
@@ -184,13 +175,16 @@ void processOnRegister(const JsonDocument& doc) {
   String entityType = doc["type"].as<String>();
   String name = doc["name"].as<String>();
 
+  // actuator Registration
   if (entityType == "actuator") {
       int level = doc["level"].as<int>();
       if (level == 0) {
           log_callback(LogType("error", "Missing level for actuator: " + name));
           return;
       }
+      Serial.println("Registered actuator: " + name + " with level " + String(level));
       smartHomeClient->addActuator(name, level);
+  // sensor Registration
   } else if (entityType == "sensor") {
       String dataType = doc["data_type"].as<String>();
       if (dataType == "") {
@@ -202,6 +196,7 @@ void processOnRegister(const JsonDocument& doc) {
       }
       smartHomeClient->addSensor(name, dataType);
       Serial.println("Registered sensor: " + name + " with data type " + dataType);
+  // unknown entity type
   } else {
       log_callback(LogType("error", "Unknown entity type: " + entityType));
   }
@@ -212,17 +207,31 @@ void processOnUpdate(const JsonDocument& doc) {
       log_callback(LogType("error", "SmartHomeClient not initialized"));
       return;
   }
-  
   String type = doc["type"].as<String>();
   String name = doc["name"].as<String>();
+
+  // sensor state update
   if (type == "sensor") {
       String state = doc["state"].as<String>();
       smartHomeClient->publishSensorState(name, state);
+
+  // actuator state update
   } else if (type == "actuator") {
       int state = doc["state"].as<int>();
       smartHomeClient->publishActuatorState(name, state);
+
+  // unknown update type
   } else {
       log_callback(LogType("error", "Unknown update type: " + type));
   }
 }
 
+void sendSerialString(const String& message) {
+  Serial2.println('\n' + message + '\n');
+}
+
+void sendSerialJson(const JsonDocument& doc) {
+  Serial2.println();
+  serializeJson(doc, Serial2);
+  Serial2.println('\n');
+}

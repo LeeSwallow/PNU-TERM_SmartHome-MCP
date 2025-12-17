@@ -1,6 +1,7 @@
 import json
-from app.util.broker import mqttClient
+
 import app.crud.dao.actuator as actuator_dao
+from paho.mqtt.client import Client
 from app.util.database import SessionLocal
 from app.schema.mqtt import MqttUpdateActuatorStateRequest, MqttRegisterResponse
 from app.util.logging import logging
@@ -8,8 +9,8 @@ from app.util.logging import logging
 logger = logging.getLogger(__name__)
 
 
-def send_register_response(device_code: str, request: MqttRegisterResponse):
-    mqttClient.publish(
+def send_register_response(client: Client, device_code: str, request: MqttRegisterResponse):
+    client.publish(  # type: ignore[attr-defined]
         f"devices/{device_code}/response",
         json.dumps(request.model_dump()),
         qos=1
@@ -17,12 +18,13 @@ def send_register_response(device_code: str, request: MqttRegisterResponse):
     logger.info(f"등록 응답 이벤트 발행: {request}")
 
 
-def send_actuator_action(device_code: str, actuator_id: int, state: int):
+
+def send_actuator_action(client: Client, device_code: str, actuator_id: int, state: int):
     db = SessionLocal()
     try:
         actuator = actuator_dao.get_actuator_by_id(db, actuator_id)
         request = MqttUpdateActuatorStateRequest(name=str(actuator.name), state=state)
-        mqttClient.publish(
+        client.publish(  # type: ignore[attr-defined]
             f"devices/{device_code}/action",
             json.dumps(request.model_dump()),
             qos=1

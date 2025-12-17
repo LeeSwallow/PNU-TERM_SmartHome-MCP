@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from app.schema.rest import *
+from app.schema.rest import RestDeviceResponse, RestActuatorResponse, RestSensorResponse, RestActuatorUpdateRequest
+from app.util.broker import mqttClient
 from app.schema.base import PageResponse, DefaultEdit
 import app.crud.dao.device as device_dao
 import app.crud.dao.actuator as actuator_dao
@@ -46,7 +47,6 @@ def get_pagination_devices(db: Session, page: int, size: int) -> PageResponse[Re
         total_items=devices.total_items
     )
 
-
 def get_pagination_actuators(db: Session, device_code: str, page: int, size: int) -> PageResponse[RestActuatorResponse]:
     actuators = actuator_dao.get_pagination(db, device_code, page, size)
     return PageResponse[RestActuatorResponse](
@@ -56,7 +56,6 @@ def get_pagination_actuators(db: Session, device_code: str, page: int, size: int
         total_pages=actuators.total_pages,
         total_items=actuators.total_items
     )
-
 
 def get_pagination_sensors(db: Session, device_code: str, page: int, size: int) -> PageResponse[RestSensorResponse]:
     sensors = sensor_dao.get_pagination(db, device_code, page, size)
@@ -68,11 +67,9 @@ def get_pagination_sensors(db: Session, device_code: str, page: int, size: int) 
         total_items=sensors.total_items
     )
 
-
 def update_device(db: Session, device_code: str, request: DefaultEdit) -> RestDeviceResponse:
     device = device_dao.update_detail(db, device_code, request)
     return RestDeviceResponse.model_validate(device)
-
 
 def update_actuator(db: Session, actuator_id: int, device_code: str, request: DefaultEdit) -> RestActuatorResponse:
     if not actuator_dao.exists_by_device_code_and_id(db, device_code, actuator_id):
@@ -83,7 +80,7 @@ def update_actuator(db: Session, actuator_id: int, device_code: str, request: De
 def update_actuator_state(db: Session, actuator_id: int, device_code: str, request: RestActuatorUpdateRequest):
     if not actuator_dao.exists_by_device_code_and_id(db, device_code, actuator_id):
         raise HTTPException(status_code=404, detail="해당 액추에이터를 찾을 수 없습니다.")
-    publisher.send_actuator_action(device_code, actuator_id, request.state)
+    publisher.send_actuator_action(mqttClient, device_code, actuator_id, request.state)
 
 def update_sensor(db: Session, sensor_id: int, device_code: str, request: DefaultEdit) -> RestSensorResponse:
     if not sensor_dao.exists_by_device_code_and_id(db, device_code, sensor_id):

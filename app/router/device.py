@@ -1,4 +1,7 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 from app.util.database import SessionDep
 from app.schema.base import PageResponse, DefaultEdit
 from app.schema.rest import RestDeviceResponse
@@ -24,3 +27,19 @@ def get_device_by_code(device_code: str, session: SessionDep) -> RestDeviceRespo
 @router.put("/{device_code}")
 def update_device(device_code:str, request: DefaultEdit, session: SessionDep) -> RestDeviceResponse:
     return crud.update_device(db=session, device_code=device_code, request=request)
+
+@router.get("/{device_code}/sse")
+async def device_sse(device_code: str):
+    from app.crud.event.sse import subscribe, unsubscribe
+    queue = subscribe(device_code)
+    async def event_stream():
+        try:
+            while True:
+                event = await queue.get()
+                yield f"{json.dumps(event)}\n\n"
+        except asyncio.CancelledError:
+            unsubscribe(device_code, queue)
+            raise
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    

@@ -116,12 +116,12 @@
     // 전역 변수 설정
     const CURRENT_DEVICE_CODE = '{{ device.device_code }}';
     
-    // 센서 자동 새로고침 시작
-    document.addEventListener('DOMContentLoaded', () => {
-        if (typeof startSensorAutoRefresh === 'function') {
-            startSensorAutoRefresh(CURRENT_DEVICE_CODE, 5000);
-        }
-    });
+    // SSE 이벤트 리스너 설정
+    const eventSource = new EventSource(`/devices/${CURRENT_DEVICE_CODE}/events`);
+    eventSource.onmessage = function(event) {
+        const parsedData = JSON.parse(event.data);
+        console.log("SSE 이벤트 수신:", parsedData);
+    };
 </script>
 {% endblock %}
 

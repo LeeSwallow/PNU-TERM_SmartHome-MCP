@@ -1,13 +1,19 @@
 import json
 
-from sqlalchemy.orm import Session
 import app.crud.dao.sensor as sensor_dao
 import app.crud.dao.actuator as actuator_dao
 from app.util.logging import logging
 from app.model.enums import RegisterType
 from app.util.database import SessionLocal
-from app.schema.mqtt import MqttRegisterSensorMessage, MqttRegisterActuatorMessage, MqttUpdateSensorStateMessage, MqttUpdateActuatorStateMessage, MqttRegisterResponse 
+from app.schema.mqtt import (
+    MqttRegisterSensorMessage,
+    MqttRegisterActuatorMessage,
+    MqttUpdateSensorStateMessage,
+    MqttUpdateActuatorStateMessage,
+    MqttRegisterResponse,
+)
 from app.crud.event.publisher import send_register_response
+from app.crud.event.sse import publish_sse_event
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +23,10 @@ def _extract_device_code(topic: str) -> str:
     else:
         raise ValueError(f"잘못된 토픽 형식: {topic}")
 
-
 def on_register(client, userdata, message):
     session = SessionLocal()
     try:
         device_code = _extract_device_code(message.topic)
-
         payload = json.loads(message.payload.decode('utf-8'))
         register_type = RegisterType(payload['type'])
 
@@ -38,10 +42,9 @@ def on_register(client, userdata, message):
         
         else:
             raise ValueError(f"잘못된 등록 타입: {register_type}")
-        
         logger.info(f"등록 완료: {response}")
-        send_register_response(device_code, response)
-    
+        send_register_response(client, device_code, response)
+        publish_sse_event(device_code, {"event": "register", "data": response.model_dump()})
     except Exception as e:
         logger.error(f"등록 처리 실패: {e}")
         session.rollback()
@@ -55,18 +58,19 @@ def on_update(client, userdata, message):
         device_code = _extract_device_code(message.topic)
         payload = json.loads(message.payload.decode('utf-8'))
         update_type = RegisterType(payload['type'])
-        
+
         if update_type == RegisterType.SENSOR:
             request = MqttUpdateSensorStateMessage.model_validate(payload)
             sensor_dao.update_state(session, device_code, request)
-        
+            publish_sse_event(device_code, {"event": "update", "data": request.model_dump()})
+
         elif update_type == RegisterType.ACTUATOR:
             request = MqttUpdateActuatorStateMessage.model_validate(payload)
             actuator_dao.update_state(session, device_code, request)
+            publish_sse_event(device_code, {"event": "update", "data": request.model_dump()})
         
         else:
             raise ValueError(f"잘못된 업데이트 타입: {update_type}")
-        
         logger.info(f"업데이트 완료: {request}")
     
     except Exception as e:

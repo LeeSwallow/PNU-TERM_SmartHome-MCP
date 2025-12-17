@@ -3,7 +3,6 @@ from app.util.database import SessionDep
 from app.schema.base import PageResponse, DefaultEdit
 import app.crud.rest as crud
 from app.schema.rest import RestActuatorResponse, RestActuatorUpdateRequest
-from pydantic import BaseModel
 
 router = APIRouter(
     prefix="/api/v1/devices/{device_code}/actuators",

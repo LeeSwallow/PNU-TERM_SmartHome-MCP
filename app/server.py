@@ -1,30 +1,21 @@
 import os
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
+
 from app.router import device, actuator, sensor, template
 from app.util.database import init_db
 from app.util.logging import logging
-from app.util.broker import mqttClient
-from app.crud.event.listener import on_register, on_update
+from app.util.broker import get_mqtt_client
+from app.crud.event.sse import set_event_loop
+
 from fastapi.templating import Jinja2Templates
 from prometheus_fastapi_instrumentator import Instrumentator
 
 logger = logging.getLogger(__name__)
-
-def mqtt_on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        logger.info("MQTT 브로커 연결 성공")
-        
-        # 연결 성공 후 토픽 구독
-        client.subscribe("devices/+/register")
-        client.subscribe("devices/+/update")
-        logger.info("MQTT 토픽 구독 완료")
-    else:
-        logger.error("MQTT 브로커 연결 실패: %s", rc)
-        client.reconnect()
 
 
 @asynccontextmanager
@@ -33,14 +24,11 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("데이터베이스 초기화 완료")
     
-    mqttClient.on_connect = mqtt_on_connect
-    
-    # 메시지 콜백 등록 (loop_start 전에 등록)
-    mqttClient.message_callback_add("devices/+/register", on_register)
-    mqttClient.message_callback_add("devices/+/update", on_update)
-    
     # MQTT 네트워크 루프 시작 (연결 시작)
+    mqttClient = get_mqtt_client()
     mqttClient.loop_start()
+    # 현재 이벤트 루프를 SSE 퍼블리셔에 등록 (타 스레드에서 이벤트 전달용)
+    set_event_loop(asyncio.get_running_loop())
     yield
     # 서버 종료 시
     mqttClient.loop_stop()
