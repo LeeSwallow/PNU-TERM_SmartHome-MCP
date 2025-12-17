@@ -43,7 +43,7 @@ class SmartHomeClient {
 public:
     using ActuatorCallback = void(*)(const String& name, int state);
     using LogCallback = void(*) (const LogType& log);
-    using RegisterCallback = void(*) (const String& name);
+    using RegisterCallback = void(*) (const String& name, const String& entity);
     // constructor
     static SmartHomeClient* getInstance(WiFiClient& wifiClient, const String& deviceId);
     SmartHomeClient(WiFiClient& wifiClient, const String& deviceId);

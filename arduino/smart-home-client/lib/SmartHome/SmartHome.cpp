@@ -223,14 +223,14 @@ void SmartHomeClient::_onRegister(String payload) {
     auto ait = client->actuators.find(key);
     if (ait != client->actuators.end()) {
         ait->second.isRegistered = true;
-        if (registerCallback != nullptr) registerCallback(name);
+        if (registerCallback != nullptr) registerCallback(name, "actuator");
         return;
     }
 
     auto sit = client->sensors.find(key);
     if (sit != client->sensors.end()) {
         sit->second.isRegistered = true;
-        if (registerCallback != nullptr) registerCallback(name);
+        if (registerCallback != nullptr) registerCallback(name, "sensor");
         return;
     }
 }
