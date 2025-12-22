@@ -1,6 +1,7 @@
 #include <ArduinoJson.h>
-#include <DHT.h>
+#include <Grove_Temperature_And_Humidity_Sensor.h>
 #include <Servo.h>
+#include <LiquidCrystal.h>
 #include <Adafruit_NeoPixel.h>
 
 #define DEBUG_BUADRATE 115200
@@ -11,24 +12,26 @@
 #define LIGHT_ACTUATOR_IDX 0
 #define DOOR_ACTUATOR_IDX 1
 #define AUTO_LIGHT_ACTUATOR_IDX 2
-#define LIGHT_ACTUATOR_PIN 5
-#define DOOR_ACTUATOR_PIN 6
+#define LIGHT_ACTUATOR_PIN 9
+#define DOOR_ACTUATOR_PIN 10
+#define HUMAN_DETECT_SENSOR_PIN 6
 #define NUMPIXELS 12
 
 // sensor settings
-#define SENSOR_COUNT 4
+#define SENSOR_COUNT 3
 #define LIGHT_SENSOR_IDX 0
 #define TEMPERATURE_SENSOR_IDX 1
 #define HUMIDITY_SENSOR_IDX 2
-#define HUMAN_DETECT_SENSOR_IDX 3
 #define LIGHT_SENSOR_PIN A0
-#define DHT11_PIN 7
-#define HUMAN_DETECT_SENSOR_PIN 8
+#define DHT11_PIN 2
+#define DHT_TYPE DHT11
 
 // timing settings
 #define REGISTER_INTERVAL 100 // 0.1 seconds
-#define REGISTER_RETRY_INTERVAL 5000
-#define SENSOR_UPDATE_INTERVAL 2000
+#define REGISTER_RETRY_INTERVAL 5000 // 5 seconds
+#define SENSOR_UPDATE_INTERVAL 5000 // 5 seconds
+#define AUTO_LIGHT_ON_INTERVAL 5000 // 5 seconds
+
 /*
 ==================================================================
     액추에이터 정의
@@ -57,7 +60,8 @@ void autoControlLight();
 Adafruit_NeoPixel pixels(NUMPIXELS, LIGHT_ACTUATOR_PIN, NEO_GRB + NEO_KHZ800);
 // servo object for door actuator
 Servo doorServo;
-
+boolean prev_human_detect_state = false;
+unsigned long human_detect_start_millis = 0;
 /*
 ==================================================================
     센서 정의
@@ -77,11 +81,12 @@ Sensor sensors[SENSOR_COUNT];
 
 // method declarations
 void registerSensors();
-void updateSensorState(int index, String& value);
+void updateSensorState(int index);
 void sendSensorState(int index);
 
 // DHT11 sensor object
-DHT dht(DHT11_PIN, DHT11);
+DHT dht11(DHT11_PIN, DHT_TYPE);
+float temp_hum[2] = {0.0, 0.0};
 
 /*==================================================================
     기반 변수 및 함수
@@ -90,6 +95,10 @@ DHT dht(DHT11_PIN, DHT11);
 
 boolean mqttConnected = false;
 unsigned long globalRegisterLastMillis = 0;
+unsigned long actuatorRegisterLastMillis = 0;
+unsigned long sensorRegisterLastMillis = 0;
+LiquidCrystal lcd(44, 45, 46, 47, 48, 49);
+
 void proccessCommand(JsonDocument& doc);
 
 void onRecivedInfo(JsonDocument& doc);
@@ -108,7 +117,11 @@ void sendSerialJson(JsonDocument& doc);
 void setup() {
     Serial.begin(DEBUG_BUADRATE);
     Serial1.begin(MQTT_BAUDRATE, SERIAL_8N1);
-    
+    lcd.begin(16, 2);
+    lcd.setCursor(0, 0);
+    lcd.print("SMART-HOME-0001");
+    delay(2000);
+
     actuators[LIGHT_ACTUATOR_IDX].name = "light";
     actuators[LIGHT_ACTUATOR_IDX].level = 256; // 0-255
     actuators[LIGHT_ACTUATOR_IDX].state = 0;
@@ -121,7 +134,7 @@ void setup() {
     pixels.show();
 
     actuators[DOOR_ACTUATOR_IDX].name = "door";
-    actuators[DOOR_ACTUATOR_IDX].level = 181; // 0-180
+    actuators[DOOR_ACTUATOR_IDX].level = 91; // 0-90
     actuators[DOOR_ACTUATOR_IDX].state = 0;
     actuators[DOOR_ACTUATOR_IDX].isRegistered = false;
     actuators[DOOR_ACTUATOR_IDX].lastRegisterSentMillis = 0;
@@ -145,7 +158,7 @@ void setup() {
     sensors[LIGHT_SENSOR_IDX].lastRegisterSentMillis = 0;
     sensors[LIGHT_SENSOR_IDX].lastStateSentMillis = 0;
 
-    dht.begin();
+    dht11.begin();
     sensors[TEMPERATURE_SENSOR_IDX].name = "temperature_sensor";
     sensors[TEMPERATURE_SENSOR_IDX].data_type = "float";
     sensors[TEMPERATURE_SENSOR_IDX].state = "0.0";
@@ -159,16 +172,11 @@ void setup() {
     sensors[HUMIDITY_SENSOR_IDX].isRegistered = false;
     sensors[HUMIDITY_SENSOR_IDX].lastRegisterSentMillis = 0;
     sensors[HUMIDITY_SENSOR_IDX].lastStateSentMillis = 0;
-
-    pinMode(HUMAN_DETECT_SENSOR_PIN, INPUT);    
-    sensors[HUMAN_DETECT_SENSOR_IDX].name = "human_detect_sensor";
-    sensors[HUMAN_DETECT_SENSOR_IDX].data_type = "boolean";
-    sensors[HUMAN_DETECT_SENSOR_IDX].state = "false";
-    sensors[HUMAN_DETECT_SENSOR_IDX].isRegistered = false;
-    sensors[HUMAN_DETECT_SENSOR_IDX].lastRegisterSentMillis = 0;
-    sensors[HUMAN_DETECT_SENSOR_IDX].lastStateSentMillis = 0;
+    pinMode(HUMAN_DETECT_SENSOR_PIN, INPUT);
 
     globalRegisterLastMillis = millis();
+    actuatorRegisterLastMillis = globalRegisterLastMillis;
+    sensorRegisterLastMillis = globalRegisterLastMillis;
 }
 
 /*==================================================================
@@ -179,7 +187,7 @@ void setup() {
 void loop() {
     
     // 명령 처리
-    JsonDocument doc;
+    StaticJsonDocument<512> doc;
     proccessCommand(doc);
 
     if (mqttConnected) {
@@ -217,10 +225,10 @@ void sendConnectionRequest() {
 
 void registerActuators() {
     unsigned long currentMillis = millis();
-    if (currentMillis - globalRegisterLastMillis < REGISTER_INTERVAL) {
+    if (currentMillis - actuatorRegisterLastMillis < REGISTER_INTERVAL) {
         return; // 등록 간격이 지나지 않음
     }
-    globalRegisterLastMillis = currentMillis;
+    actuatorRegisterLastMillis = currentMillis;
 
     for (int i = 0; i < ACTUATOR_COUNT; i++) {
         if (!actuators[i].isRegistered && (currentMillis - actuators[i].lastRegisterSentMillis >= REGISTER_RETRY_INTERVAL)) {
@@ -239,10 +247,10 @@ void registerActuators() {
 
 void registerSensors() {
     unsigned long currentMillis = millis();
-    if (currentMillis - globalRegisterLastMillis < REGISTER_INTERVAL) {
+    if (currentMillis - sensorRegisterLastMillis < REGISTER_INTERVAL) {
         return; // 등록 간격이 지나지 않음
     }
-    globalRegisterLastMillis = currentMillis;
+    sensorRegisterLastMillis = currentMillis;
     
     for (int i = 0; i < SENSOR_COUNT; i++) {
         if (!sensors[i].isRegistered && (currentMillis - sensors[i].lastRegisterSentMillis >= REGISTER_RETRY_INTERVAL)) {
@@ -272,9 +280,13 @@ void onRecievedConnection(JsonDocument& doc) {
     if (status) {
         mqttConnected = true;
         Serial.println("MQTT connected");
+        lcd.setCursor(0, 1);
+        lcd.print("WiFi Connected      ");
     } else {
         mqttConnected = false;
         Serial.println("MQTT failed to connect.. retrying");
+        lcd.setCursor(0, 1);
+        lcd.print("WiFi Conn. Fail     ");
     }
 }
 
@@ -326,41 +338,52 @@ void onRecievedAction(JsonDocument& doc) {
 }
 
 void proccessCommand(JsonDocument& doc) {
-    if (Serial1.available()) {
-        String command = Serial1.readStringUntil('\n');
-        command.trim();
-        if (command.length() == 0) return;
-        
-        doc.clear();
-        DeserializationError error = deserializeJson(doc, command);
-        if (error) {
-            Serial.println("Failed to parse JSON: " + String(error.c_str()));
-            return;
-        }
-        Serial.println("command Recieved : " + command);
-        String type = doc["type"].as<String>();
+    // Non-blocking serial read
+    static String inputBuffer = "";
+    while (Serial1.available()) {
+        char c = Serial1.read();
+        if (c == '\n') {
+            inputBuffer.trim();
+            if (inputBuffer.length() == 0) {
+                inputBuffer = "";
+                return;
+            }
+            
+            doc.clear();
+            DeserializationError error = deserializeJson(doc, inputBuffer);
+            if (error) {
+                Serial.println("Failed to parse JSON: " + String(error.c_str()));
+                inputBuffer = "";
+                return;
+            }
+            Serial.println("command Recieved : " + inputBuffer);
+            String type = doc["type"].as<String>();
 
-        // MQTT Client의 연결 상태 처리
-        if (type == "connection") {
-            onRecievedConnection(doc);
-        }
-        // MQTT Client 의 로그 메시지 처리
-        else if (type == "info") {
-            onRecievedInfo(doc);
-        }
-        // MQTT Client 의 에러 메시지 처리
-        else if (type == "error") {
-            onRecivedError(doc);
-        }
-        // MQTT Client 로부터의 등록 완료 알림 처리
-        else if (type == "register") {
-            onRecivedRegister(doc);
-        }
-        // 액추에이터에 대한 동작 명령 처리
-        else if (type == "actuator") {
-            onRecievedAction(doc);
-        } else {
-            Serial.println("Unknown command type: " + type);
+            // MQTT Client의 연결 상태 처리
+            if (type == "connection") {
+                onRecievedConnection(doc);
+            }
+            // MQTT Client 의 로그 메시지 처리
+            else if (type == "info") {
+                onRecievedInfo(doc);
+            }
+            // MQTT Client 의 에러 메시지 처리
+            else if (type == "error") {
+                onRecivedError(doc);
+            }
+            // MQTT Client 로부터의 등록 완료 알림 처리
+            else if (type == "register") {
+                onRecivedRegister(doc);
+            }
+            // 액추에이터에 대한 동작 명령 처리
+            else if (type == "actuator") {
+                onRecievedAction(doc);
+            } else {
+                Serial.println("Unknown command type: " + type);
+            }
+            inputBuffer = "";
+        } else if (c != '\r') {
+            inputBuffer += c;
         }
     }
 }
@@ -392,29 +415,27 @@ void updateSensorState(int index) {
     if (!sensors[index].isRegistered || (currentMillis - sensors[index].lastStateSentMillis < SENSOR_UPDATE_INTERVAL)) {
         return;
     }
-    switch(index) {
-        case LIGHT_SENSOR_IDX: {
+
+    if (index == LIGHT_SENSOR_IDX) {
             int lightValue = analogRead(LIGHT_SENSOR_PIN);
             sensors[index].state = String(lightValue);
-            break;
-        }
-        case TEMPERATURE_SENSOR_IDX: {
-            float temperature = dht.readTemperature();
-            sensors[index].state = String(temperature);
-            break;
-        }
-        case HUMIDITY_SENSOR_IDX: {
-            float humidity = dht.readHumidity();
-            sensors[index].state = String(humidity);
-            break;
-        }
-        case HUMAN_DETECT_SENSOR_IDX: {
-            int humanDetectValue = digitalRead(HUMAN_DETECT_SENSOR_PIN);
-            sensors[index].state = humanDetectValue == HIGH ? "true" : "false";
-            break;
-        }
+            sendSensorState(index);
+            return;
     }
-    sendSensorState(index);
+    if (index == TEMPERATURE_SENSOR_IDX) {
+        if (!dht11.readTempAndHumidity(temp_hum)) {
+            sensors[TEMPERATURE_SENSOR_IDX].state = String(temp_hum[1], 1);
+            sendSensorState(TEMPERATURE_SENSOR_IDX);
+        }
+        return;
+    }
+    if (index == HUMIDITY_SENSOR_IDX) {
+        if (!dht11.readTempAndHumidity(temp_hum)) {
+            sensors[HUMIDITY_SENSOR_IDX].state = String(temp_hum[0], 1);
+            sendSensorState(HUMIDITY_SENSOR_IDX);
+        }
+        return;
+    }
 }
 
 void updateActuatorState(int index, int value) {
@@ -422,7 +443,6 @@ void updateActuatorState(int index, int value) {
         Serial.println("Actuator not registered: " + actuators[index].name);
         return;
     }
-
     switch (index) {
         case LIGHT_ACTUATOR_IDX:
             actuators[index].state = value;
@@ -448,15 +468,30 @@ void updateActuatorState(int index, int value) {
 }
 
 void autoControlLight() {
-    unsigned long currentMillis = millis();
-    if (actuators[AUTO_LIGHT_ACTUATOR_IDX].state == 0 ||
-        currentMillis - actuators[LIGHT_ACTUATOR_IDX].lastStateSentMillis < SENSOR_UPDATE_INTERVAL) {
-        return; 
-    }
-    if (sensors[HUMAN_DETECT_SENSOR_IDX].state == "true") {
-        updateActuatorState(LIGHT_ACTUATOR_IDX, 255);
-    } else {
-        updateActuatorState(LIGHT_ACTUATOR_IDX, 0);
+    if (actuators[AUTO_LIGHT_ACTUATOR_IDX].state == 1) { // 자동 조명 모드가 켜져 있을 때
+        unsigned long currentMillis = millis();
+        boolean human_detect_state = (digitalRead(HUMAN_DETECT_SENSOR_PIN) == HIGH);
+        // positive edge 감지
+        if (human_detect_state && !prev_human_detect_state) {
+            human_detect_start_millis = currentMillis;
+            Serial.println("Human Detected!!");
+            if (actuators[LIGHT_ACTUATOR_IDX].state < 255) {
+                actuators[LIGHT_ACTUATOR_IDX].state = 255;
+                for (int i=0; i<NUMPIXELS; ++i) pixels.setPixelColor(i, pixels.Color(255,255,255));
+                pixels.show();
+                sendActuatorState(LIGHT_ACTUATOR_IDX);
+            }
+        }
+        // 일정 시간 동안 사람이 감지되지 않으면 조명 끄기
+        else if (currentMillis - human_detect_start_millis >= AUTO_LIGHT_ON_INTERVAL) {
+            if (!human_detect_state && actuators[LIGHT_ACTUATOR_IDX].state > 0) {
+                actuators[LIGHT_ACTUATOR_IDX].state = 0;
+                for (int i=0; i<NUMPIXELS; ++i) pixels.setPixelColor(i, pixels.Color(0,0,0));
+                pixels.show();
+                sendActuatorState(LIGHT_ACTUATOR_IDX);
+            }
+        }
+        prev_human_detect_state = human_detect_state;
     }
 }
 

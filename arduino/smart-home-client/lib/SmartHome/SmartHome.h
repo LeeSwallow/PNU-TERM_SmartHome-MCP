@@ -69,6 +69,7 @@ private:
 
     String deviceId;
     PubSubClient mqttClient;
+    String username, password;
     String registerSub, actionSub, registerPub, actionPub;
     std::unordered_map<std::string, Actuator> actuators;
     std::unordered_map<std::string, Sensor> sensors;

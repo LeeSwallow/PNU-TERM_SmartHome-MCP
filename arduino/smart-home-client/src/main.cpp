@@ -29,7 +29,7 @@ void register_callback(const String& name);
 void actuator_callback(const String& actuator_name, int value);
 void setup_smart_home();
 void processSerialCommands();
-void proccessOnConnectQuery();
+void prㅍ  occessOnConnectQuery();
 void processOnRegister(const JsonDocument& doc);
 void processOnUpdate(const JsonDocument& doc);
 void sendSerialString(const String& message);
@@ -38,6 +38,8 @@ void sendSerialJson(const JsonDocument& doc);
 void setup() {
   Serial.begin(115200); // for debugging
   Serial2.begin(9600, SERIAL_8N1, SERIAL2_RX_PIN, SERIAL2_TX_PIN); // for communication with executor
+  Serial2.setRxBufferSize(1024);
+  Serial2.setTimeout(200); // 200 milliseconds timeout for reading
   setup_WiFi();
   setup_smart_home();
   previousMillis = millis();
@@ -93,8 +95,8 @@ void register_callback(const String& name, const String& entity) {
   doc["type"] = "register";
   doc["entity"] = entity;
   doc["name"] = name;
-  Serial.println("Register Callback: " + name + " (" + entity + ")");
   sendSerialJson(doc);
+  log_callback(LogType("info", "Register Callback: " + entity + " -> " + name));
 }
 
 void actuator_callback(const String& actuator_name, int value) {
@@ -102,8 +104,8 @@ void actuator_callback(const String& actuator_name, int value) {
   doc["type"] = "actuator";
   doc["name"] = actuator_name;
   doc["value"] = value;
-  Serial.println("Actuator Callback: " + actuator_name + " -> " + String(value));
   sendSerialJson(doc);
+  log_callback(LogType("info", "Actuator Callback: " + actuator_name + " -> " + String(value)));
 }
 
 void setup_smart_home() {
@@ -212,11 +214,13 @@ void processOnUpdate(const JsonDocument& doc) {
 
   // sensor state update
   if (type == "sensor") {
+      log_callback(LogType("info", "Processing sensor update for: " + name));
       String state = doc["state"].as<String>();
       smartHomeClient->publishSensorState(name, state);
 
   // actuator state update
   } else if (type == "actuator") {
+      log_callback(LogType("info", "Processing actuator update for: " + name));
       int state = doc["state"].as<int>();
       smartHomeClient->publishActuatorState(name, state);
 

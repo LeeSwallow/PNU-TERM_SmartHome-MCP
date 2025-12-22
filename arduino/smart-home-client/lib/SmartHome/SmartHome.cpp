@@ -107,6 +107,8 @@ void SmartHomeClient::setupMQTT(const char* server, uint16_t port, const char* u
     mqttClient.setServer(server, port);
     while (!mqttClient.connected()) {
         if (mqttClient.connect(deviceId.c_str(), username, password)) {
+            this->username = String(username);
+            this->password = String(password);
             Serial.println("connected");
             registerSub = String("devices/") + deviceId + "/response";
             actionSub = String("devices/") + deviceId + "/action";
@@ -175,7 +177,16 @@ void SmartHomeClient::publishActuatorState(String name, int state) {
 
 void SmartHomeClient::loop() {
     if (!mqttClient.connected()) {
-        return;
+        if (mqttClient.connect(deviceId.c_str(), username.c_str(), password.c_str())) {
+            mqttClient.subscribe(registerSub.c_str());
+            mqttClient.subscribe(actionSub.c_str());
+        } else {
+            if (logCallback != nullptr) {
+                logCallback(LogType("error", "failed to reconnect to MQTT broker, rc=" + String(mqttClient.state())));
+            }
+            return;
+        }
+
     }
     mqttClient.loop();
     for (auto& pair : actuators) {
