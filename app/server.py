@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from app.router import device, actuator, sensor, template
 from app.util.database import init_db
 from app.util.logging import logging
-from app.util.broker import get_mqtt_client
+from app.util import broker
 from app.crud.event.sse import set_event_loop
 
 from fastapi.templating import Jinja2Templates
@@ -25,14 +25,15 @@ async def lifespan(app: FastAPI):
     logger.info("데이터베이스 초기화 완료")
     
     # MQTT 네트워크 루프 시작 (연결 시작)
-    mqttClient = get_mqtt_client()
-    mqttClient.loop_start()
+    broker.get_mqtt_client()
+    broker.mqttClient.loop_start()
     # 현재 이벤트 루프를 SSE 퍼블리셔에 등록 (타 스레드에서 이벤트 전달용)
     set_event_loop(asyncio.get_running_loop())
     yield
     # 서버 종료 시
-    mqttClient.loop_stop()
-    logger.info("MQTT 브로커 연결 종료")
+    if broker.mqttClient:
+        broker.mqttClient.loop_stop()
+        logger.info("MQTT 브로커 연결 종료")
 
     
 app = FastAPI(

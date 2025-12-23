@@ -1,5 +1,5 @@
 {% macro sensor_card(sensor) %}
-<div class="card h-100 sensor-card">
+<div class="card h-100 sensor-card" data-sensor-name="{{ sensor.name }}" data-sensor-id="{{ sensor.id }}">
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-3">
             <div class="flex-grow-1">
@@ -17,7 +17,7 @@
         <div class="sensor-info">
             <div class="sensor-value">
                 <span class="state-label">현재 값</span>
-                <span class="sensor-reading" id="sensor-{{ sensor.id }}">{{ sensor.state or 0 }}</span>
+                <span class="sensor-reading sensor-state" id="sensor-{{ sensor.id }}">{{ sensor.state or 0 }}</span>
             </div>
             <div class="sensor-range">
                 <span class="badge bg-info">타입: {{ sensor.sensor_type.value if sensor.sensor_type else 'N/A' }}</span>

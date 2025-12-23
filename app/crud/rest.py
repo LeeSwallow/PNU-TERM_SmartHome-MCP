@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.schema.rest import RestDeviceResponse, RestActuatorResponse, RestSensorResponse, RestActuatorUpdateRequest
-from app.util.broker import mqttClient
+from app.util import broker
 from app.schema.base import PageResponse, DefaultEdit
 import app.crud.dao.device as device_dao
 import app.crud.dao.actuator as actuator_dao
@@ -80,7 +80,7 @@ def update_actuator(db: Session, actuator_id: int, device_code: str, request: De
 def update_actuator_state(db: Session, actuator_id: int, device_code: str, request: RestActuatorUpdateRequest):
     if not actuator_dao.exists_by_device_code_and_id(db, device_code, actuator_id):
         raise HTTPException(status_code=404, detail="해당 액추에이터를 찾을 수 없습니다.")
-    publisher.send_actuator_action(mqttClient, device_code, actuator_id, request.state)
+    publisher.send_actuator_action(broker.mqttClient, device_code, actuator_id, request.state)
 
 def update_sensor(db: Session, sensor_id: int, device_code: str, request: DefaultEdit) -> RestSensorResponse:
     if not sensor_dao.exists_by_device_code_and_id(db, device_code, sensor_id):

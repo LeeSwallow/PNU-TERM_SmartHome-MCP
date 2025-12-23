@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 def send_register_response(client: Client, device_code: str, request: MqttRegisterResponse):
+    if client is None:
+        logger.error("MQTT 클라이언트가 초기화되지 않았습니다.")
+        return
+    
     client.publish(  # type: ignore[attr-defined]
         f"devices/{device_code}/response",
         json.dumps(request.model_dump()),
@@ -20,6 +24,10 @@ def send_register_response(client: Client, device_code: str, request: MqttRegist
 
 
 def send_actuator_action(client: Client, device_code: str, actuator_id: int, state: int):
+    if client is None:
+        logger.error("MQTT 클라이언트가 초기화되지 않았습니다.")
+        return
+    
     db = SessionLocal()
     try:
         actuator = actuator_dao.get_actuator_by_id(db, actuator_id)

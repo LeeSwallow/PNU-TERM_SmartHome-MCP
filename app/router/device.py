@@ -36,7 +36,8 @@ async def device_sse(device_code: str):
         try:
             while True:
                 event = await queue.get()
-                yield f"{json.dumps(event)}\n\n"
+                # SSE 형식: data: {json}\n\n
+                yield f"data: {json.dumps(event)}\n\n"
         except asyncio.CancelledError:
             unsubscribe(device_code, queue)
             raise

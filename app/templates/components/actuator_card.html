@@ -1,5 +1,5 @@
 {% macro actuator_card(actuator, device_code) %}
-<div class="card h-100 actuator-card">
+<div class="card h-100 actuator-card" data-actuator-name="{{ actuator.name }}" data-actuator-id="{{ actuator.id }}">
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-3">
             <div class="flex-grow-1">
@@ -17,7 +17,7 @@
         <div class="actuator-controls">
             <div class="state-display">
                 <span class="text-muted">현재 상태</span>
-                <span class="state-value" id="state-{{ actuator.id }}">{{ actuator.state or 0 }}</span>
+                <span class="state-value actuator-state" id="state-{{ actuator.id }}">{{ actuator.state or 0 }}</span>
             </div>
             
             <div class="slider-container">
