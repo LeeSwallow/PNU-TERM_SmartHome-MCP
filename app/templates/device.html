@@ -116,50 +116,27 @@
     // 전역 변수 설정
     const CURRENT_DEVICE_CODE = '{{ device.device_code }}';
     
-    // 디버깅: 페이지 로드 시 모든 센서 카드 확인
-    document.addEventListener('DOMContentLoaded', function() {
-        const allSensorCards = document.querySelectorAll('[data-sensor-name]');
-        console.log('=== 페이지에 있는 모든 센서 카드 ===');
-        allSensorCards.forEach(card => {
-            console.log(`센서 이름: "${card.getAttribute('data-sensor-name')}", ID: ${card.getAttribute('data-sensor-id')}`);
-        });
-        console.log('================================');
-    });
-    
     // SSE 이벤트 리스너 설정
     const eventSource = new EventSource(`/api/v1/devices/${CURRENT_DEVICE_CODE}/sse`);
     eventSource.onmessage = function(event) {
         const parsedData = JSON.parse(event.data);
-        console.log("SSE 이벤트 수신:", parsedData);
         
         // update 이벤트 처리
         if (parsedData.event === 'update' && parsedData.data) {
             const { type, name, state } = parsedData.data;
-            console.log(`업데이트 타입: ${type}, 이름: ${name}, 상태: ${state}`);
             
             if (type === 'sensor') {
                 // 센서 상태 업데이트
                 const sensorCard = document.querySelector(`[data-sensor-name="${name}"]`);
-                console.log(`센서 카드 찾기 (${name}):`, sensorCard);
-                
                 if (sensorCard) {
                     const stateElement = sensorCard.querySelector('.sensor-state');
-                    console.log('센서 상태 요소:', stateElement);
-                    
                     if (stateElement) {
                         stateElement.textContent = state;
-                        console.log(`센서 ${name} 상태 업데이트 완료: ${state}`);
-                    } else {
-                        console.warn(`센서 ${name}의 상태 요소를 찾을 수 없습니다`);
                     }
-                } else {
-                    console.warn(`센서 카드를 찾을 수 없습니다: ${name}`);
                 }
             } else if (type === 'actuator') {
                 // 액추에이터 상태 업데이트
                 const actuatorCard = document.querySelector(`[data-actuator-name="${name}"]`);
-                console.log(`액추에이터 카드 찾기 (${name}):`, actuatorCard);
-                
                 if (actuatorCard) {
                     const stateElement = actuatorCard.querySelector('.actuator-state');
                     const sliderId = actuatorCard.getAttribute('data-actuator-id');
@@ -171,9 +148,6 @@
                     if (sliderElement) {
                         sliderElement.value = state;
                     }
-                    console.log(`액추에이터 ${name} 상태 업데이트 완료: ${state}`);
-                } else {
-                    console.warn(`액추에이터 카드를 찾을 수 없습니다: ${name}`);
                 }
             }
         }
