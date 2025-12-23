@@ -3,7 +3,7 @@
     <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-3">
             <div class="flex-grow-1">
-                <h5 class="card-title mb-1">{{ sensor.name }}</h5>
+                <h5 class="card-title mb-1">{{ sensor.name_shown or sensor.name }}</h5>
                 <p class="text-muted small mb-0">{{ sensor.description or '설명 없음' }}</p>
             </div>
             <div class="d-flex align-items-center gap-2">
