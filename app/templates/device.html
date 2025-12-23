@@ -116,6 +116,16 @@
     // 전역 변수 설정
     const CURRENT_DEVICE_CODE = '{{ device.device_code }}';
     
+    // 디버깅: 페이지 로드 시 모든 센서 카드 확인
+    document.addEventListener('DOMContentLoaded', function() {
+        const allSensorCards = document.querySelectorAll('[data-sensor-name]');
+        console.log('=== 페이지에 있는 모든 센서 카드 ===');
+        allSensorCards.forEach(card => {
+            console.log(`센서 이름: "${card.getAttribute('data-sensor-name')}", ID: ${card.getAttribute('data-sensor-id')}`);
+        });
+        console.log('================================');
+    });
+    
     // SSE 이벤트 리스너 설정
     const eventSource = new EventSource(`/api/v1/devices/${CURRENT_DEVICE_CODE}/sse`);
     eventSource.onmessage = function(event) {
